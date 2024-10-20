@@ -50,7 +50,7 @@ func (t *Table) colorizeWithRegex(s string, colorMods []ColumnColorMod) string {
 	// Apply color modifications in the order given.
 	// If a character is already colored with a higher-priority color, it won't be overwritten.
 	for priority, mod := range colorMods {
-		if mod.color == Plain || mod.regex == nil {
+		if mod.regex == nil {
 			// Skip modifications that have no associated color or regex
 			continue
 		}

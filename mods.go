@@ -57,6 +57,7 @@ func NewColumnMod(coloring []ColumnColorMod) ColumnMod {
 }
 
 var (
+	LibPlain     = color.New(color.Reset)
 	LibBlack     = color.New(color.FgBlack)
 	LibRed       = color.New(color.FgRed)
 	LibGreen     = color.New(color.FgGreen)
@@ -78,7 +79,7 @@ var (
 func (c Color) toLibColor() *color.Color {
 	switch c {
 	case Plain:
-		panic("Plain color should not be passed here")
+		return LibPlain
 	case Black:
 		return LibBlack
 	case Red:
