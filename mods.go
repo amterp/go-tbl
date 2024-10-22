@@ -28,6 +28,9 @@ const (
 	HiMagenta
 	HiCyan
 	HiWhite
+
+	Orange
+	Pink
 )
 
 type HeaderMod struct {
@@ -74,6 +77,9 @@ var (
 	LibHiMagenta = color.New(color.FgHiMagenta)
 	LibHiCyan    = color.New(color.FgHiCyan)
 	LibHiWhite   = color.New(color.FgHiWhite)
+
+	LibOrange = color.RGB(255, 128, 0)
+	LibPink   = color.RGB(255, 172, 187)
 )
 
 func (c Color) toLibColor() *color.Color {
@@ -112,6 +118,10 @@ func (c Color) toLibColor() *color.Color {
 		return LibHiCyan
 	case HiWhite:
 		return LibHiWhite
+	case Orange:
+		return LibOrange
+	case Pink:
+		return LibPink
 	default:
 		panic(fmt.Sprintf("Unknown color: %d", c))
 	}
