@@ -2,7 +2,7 @@ package tblwriter
 
 import (
 	"fmt"
-	"github.com/fatih/color"
+	"github.com/amterp/color"
 	"regexp"
 )
 

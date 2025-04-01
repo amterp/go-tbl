@@ -1,7 +1,7 @@
 package tblwriter
 
 import (
-	"github.com/fatih/color"
+	"github.com/amterp/color"
 	"regexp"
 	"strings"
 )
