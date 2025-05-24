@@ -64,7 +64,7 @@ type Table struct {
 	out                     io.Writer
 	rows                    [][]string
 	lines                   [][][]string
-	cs                      map[int]int // Column Sizes? [column][row]
+	cs                      map[int]int // Column Sizes?
 	rs                      map[int]int
 	headers                 [][]string
 	footers                 [][]string
@@ -982,21 +982,19 @@ func (t *Table) printRowMergeCells(writer io.Writer, columns [][]string, rowIdx 
 		fmt.Fprint(writer, t.newLine)
 	}
 
-	//The new previous line is the current one
+	// The new previous line is the current one
 	previousLine = make([]string, total)
 	for y := 0; y < total; y++ {
-		previousLine[y] = strings.TrimRight(strings.Join(columns[y], " "), " ") //Store the full line for multi-lines cells
+		previousLine[y] = strings.TrimRight(strings.Join(columns[y], " "), " ") // Store the full line for multi-lines cells
 	}
-	//Returns the newly added line and wether or not a border should be displayed above.
+	// Returns the newly added line and whether or not a border should be displayed above.
 	return previousLine, displayCellBorder
 }
 
 // parseDimension - parse table dimensions
 func (t *Table) parseDimension(str string, colKey, rowKey int) []string {
-	var (
-		raw      []string
-		maxWidth int
-	)
+	var raw []string
+	var maxWidth int
 
 	raw = getLines(str)
 	maxWidth = 0
@@ -1053,6 +1051,6 @@ func (t *Table) parseDimension(str string, colKey, rowKey int) []string {
 	if !ok || v < h || v == 0 {
 		t.rs[rowKey] = h
 	}
-	//fmt.Printf("Raw %+v %d\n", raw, len(raw))
+
 	return raw
 }
