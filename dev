@@ -34,6 +34,7 @@ if release:
 
     $!`git diff HEAD --compact-summary`
     if confirm("Confirm tag & push? > "):
+        branch = get_branch()
         $!`git tag -a "{version}" -m "Bump version to {version}"`
         $!`git push origin {branch} --tags`
 
