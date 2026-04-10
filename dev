@@ -8,15 +8,15 @@ args:
     release r int?  # 1 to bump patch, 2 for minor and 3 for major.
 
 get_branch = fn():
-    _, branch  = $!`echo -n $(git branch --show-current)`
+    _, branch  = $`echo -n $(git branch --show-current)`
     return branch
 
 if build or push:
-    $!`go build`
+    $`go build`
 
 if release:
     // resolve version /////////////
-    _, tags = $!`git tag`
+    _, tags = $`git tag`
     tags = split(tags[:-1], "\n")
     tags = [replace(t, "v", "") for t in tags]
     tags = [split(t, "\.") for t in tags]
@@ -32,14 +32,14 @@ if release:
     print("Bumping to version:", green(version))
     ///////////////////////////////
 
-    $!`git diff HEAD --compact-summary`
+    $`git diff HEAD --compact-summary`
     if confirm("Confirm tag & push? > "):
         branch = get_branch()
-        $!`git tag -a "{version}" -m "Bump version to {version}"`
-        $!`git push origin {branch} --tags`
+        $`git tag -a "{version}" -m "Bump version to {version}"`
+        $`git push origin {branch} --tags`
 
 if push and not release:
     branch = get_branch()
-    $!`git push origin {branch} --tags`
+    $`git push origin {branch} --tags`
 
 print(green("✅ Done!"))
