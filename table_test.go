@@ -1727,3 +1727,455 @@ func TestRadTableHeadersAlign(t *testing.T) {
 
 	//assertEqualStr(t, buf.String(), "", "border table rendering failed")
 }
+
+func TestTransposeBasic(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age", "City"})
+	table.Append([]string{"Alice", "30", "NYC"})
+	table.Append([]string{"Bob", "25", "London"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+------+-------+--------+
+| NAME | Alice | Bob    |
+| AGE  |    30 |     25 |
+| CITY | NYC   | London |
++------+-------+--------+
+`
+	assertEqualStr(t, buf.String(), want, "basic transpose failed")
+}
+
+func TestTransposeNoHeaders(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.Append([]string{"Alice", "30"})
+	table.Append([]string{"Bob", "25"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+-------+-----+
+| Alice | Bob |
+|    30 |  25 |
++-------+-----+
+`
+	assertEqualStr(t, buf.String(), want, "transpose no headers failed")
+}
+
+func TestTransposeWithFooters(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.Append([]string{"Bob", "25"})
+	table.SetFooter([]string{"Total", "55"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+------+-------+-----+-------+
+| NAME | Alice | Bob | TOTAL |
+| AGE  |    30 |  25 |    55 |
++------+-------+-----+-------+
+`
+	assertEqualStr(t, buf.String(), want, "transpose with footers failed")
+}
+
+func TestTransposeEmptyTable(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetTranspose(true)
+	table.Render()
+
+	// Empty tables render minimal borders (same as non-transposed)
+	want := "+\n+\n"
+	assertEqualStr(t, buf.String(), want, "transpose empty table failed")
+}
+
+func TestTransposeSingleRow(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age", "City"})
+	table.Append([]string{"Alice", "30", "NYC"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+------+-------+
+| NAME | Alice |
+| AGE  |    30 |
+| CITY | NYC   |
++------+-------+
+`
+	assertEqualStr(t, buf.String(), want, "transpose single row failed")
+}
+
+func TestTransposeSingleColumn(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name"})
+	table.Append([]string{"Alice"})
+	table.Append([]string{"Bob"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+------+-------+-----+
+| NAME | Alice | Bob |
++------+-------+-----+
+`
+	assertEqualStr(t, buf.String(), want, "transpose single column failed")
+}
+
+func TestTransposeRenderTwice(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.SetTranspose(true)
+
+	table.Render()
+	first := buf.String()
+
+	buf.Reset()
+	table.Render()
+	second := buf.String()
+
+	assertEqualStr(t, first, second, "transpose render twice - outputs differ")
+}
+
+func TestTransposeRaggedRows(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"A", "B", "C"})
+	table.Append([]string{"1", "2"})
+	table.Append([]string{"3", "4", "5"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+---+---+---+
+| A | 1 | 3 |
+| B | 2 | 4 |
+| C |   | 5 |
++---+---+---+
+`
+	assertEqualStr(t, buf.String(), want, "transpose ragged rows failed")
+}
+
+func TestTransposeHeadersOnly(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age", "City"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+------+
+| NAME |
+| AGE  |
+| CITY |
++------+
+`
+	assertEqualStr(t, buf.String(), want, "transpose headers only failed")
+}
+
+func TestTransposeWithRowLine(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.Append([]string{"Bob", "25"})
+	table.SetRowLine(true)
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+------+-------+-----+
+| NAME | Alice | Bob |
++------+-------+-----+
+| AGE  |    30 |  25 |
++------+-------+-----+
+`
+	assertEqualStr(t, buf.String(), want, "transpose with row line failed")
+}
+
+func TestTransposeWithUnicode(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.SetUnicodeHV(Regular, Regular)
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `┌──────┬───────┐
+│ NAME │ Alice │
+│ AGE  │    30 │
+└──────┴───────┘
+`
+	assertEqualStr(t, buf.String(), want, "transpose with unicode failed")
+}
+
+func TestTransposeBordersOff(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.EnableBorder(false)
+	table.SetTranspose(true)
+	table.Render()
+
+	want := "  NAME | Alice  \n  AGE  |    30  \n"
+	assertEqualStr(t, buf.String(), want, "transpose borders off failed")
+}
+
+func TestTransposeAutoFmtOff(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetAutoFormatHeaders(false)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+------+-------+
+| Name | Alice |
+| Age  |    30 |
++------+-------+
+`
+	assertEqualStr(t, buf.String(), want, "transpose autoFmt off failed")
+}
+
+func TestTransposeWithAutoWrapMultiline(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Key", "Val"})
+	table.Append([]string{"desc", "Line1\nLine2"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+-----+-------+
+| KEY | desc  |
+| VAL | Line1 |
+|     | Line2 |
++-----+-------+
+`
+	assertEqualStr(t, buf.String(), want, "transpose with multiline cell failed")
+}
+
+func TestTransposeThenNormalRender(t *testing.T) {
+	// Verify that rendering transposed then normal produces correct output both times
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+
+	// First render: transposed
+	table.SetTranspose(true)
+	table.Render()
+	transposed := buf.String()
+
+	wantTransposed := `+------+-------+
+| NAME | Alice |
+| AGE  |    30 |
++------+-------+
+`
+	assertEqualStr(t, transposed, wantTransposed, "transposed render failed")
+
+	// Second render: normal
+	buf.Reset()
+	table.SetTranspose(false)
+	table.Render()
+	normal := buf.String()
+
+	wantNormal := `+-------+-----+
+| NAME  | AGE |
++-------+-----+
+| Alice |  30 |
++-------+-----+
+`
+	assertEqualStr(t, normal, wantNormal, "normal render after transpose failed")
+}
+
+func TestTransposeWithColumnAlignment(t *testing.T) {
+	// Column alignment is cleared during transpose (doesn't map to transposed layout),
+	// but should be restored for subsequent non-transposed renders
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.SetColumnAlignment([]int{ALIGN_LEFT, ALIGN_CENTER})
+	table.SetTranspose(true)
+	table.Render()
+
+	// In transposed mode, alignment is cleared - default behavior applies
+	want := `+------+-------+
+| NAME | Alice |
+| AGE  |    30 |
++------+-------+
+`
+	assertEqualStr(t, buf.String(), want, "transpose with column alignment failed")
+}
+
+func TestTransposeRaggedFooter(t *testing.T) {
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"A", "B", "C"})
+	table.Append([]string{"1", "2", "3"})
+	table.SetFooter([]string{"X"}) // fewer footer cells than columns
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+---+---+---+
+| A | 1 | X |
+| B | 2 |   |
+| C | 3 |   |
++---+---+---+
+`
+	assertEqualStr(t, buf.String(), want, "transpose ragged footer failed")
+}
+
+func TestTransposePreservesState(t *testing.T) {
+	// Verify table internals are fully restored after transposed render
+	table := NewWriter(&bytes.Buffer{})
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.Append([]string{"Bob", "25"})
+	table.SetTranspose(true)
+
+	linesBefore := table.NumLines()
+	table.Render()
+	linesAfter := table.NumLines()
+
+	if linesBefore != linesAfter {
+		t.Errorf("NumLines changed after transposed render: %d -> %d", linesBefore, linesAfter)
+	}
+}
+
+func TestTransposeFooterAutoFmt(t *testing.T) {
+	// Verify footer text gets Title() applied in transposed mode,
+	// matching how printFooter would render it in normal mode.
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.SetFooter([]string{"total", "sum"})
+	table.SetTranspose(true)
+	table.Render()
+
+	want := `+------+-------+-------+
+| NAME | Alice | TOTAL |
+| AGE  |    30 | SUM   |
++------+-------+-------+
+`
+	assertEqualStr(t, buf.String(), want, "transpose footer autoFmt failed")
+}
+
+func TestTransposeRemapsColumnModsToRows(t *testing.T) {
+	// After transposition, original column i becomes visual row i, so
+	// column-level color rules must migrate to rowModsByIdx to keep the
+	// same values highlighted in the transposed layout.
+	table := NewWriter(&bytes.Buffer{})
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.Append([]string{"Bob", "25"})
+
+	nameMod := NewColumnMod([]ColumnColorMod{NewColumnColorMod(COLOR_ALL, Red)})
+	ageMod := NewColumnMod([]ColumnColorMod{NewColumnColorMod(COLOR_ALL, Blue)})
+	table.SetColumnMods(map[int]ColumnMod{0: nameMod, 1: ageMod})
+
+	table.applyTranspose()
+
+	if got := len(table.columnModsByIdx); got != 0 {
+		t.Errorf("columnModsByIdx should be empty after transpose, got %d entries", got)
+	}
+	if got := len(table.rowModsByIdx); got != 2 {
+		t.Fatalf("rowModsByIdx should have 2 entries, got %d", got)
+	}
+	if c := table.rowModsByIdx[0].coloring[0].color; c != Red {
+		t.Errorf("row 0 (ex-Name column) color = %v, want Red", c)
+	}
+	if c := table.rowModsByIdx[1].coloring[0].color; c != Blue {
+		t.Errorf("row 1 (ex-Age column) color = %v, want Blue", c)
+	}
+}
+
+func TestTransposeHeaderColorMovesToColumnZero(t *testing.T) {
+	// In transposed layout, original header labels are stacked vertically
+	// in column 0. The header color should be preserved there, and must
+	// take precedence over any row mod inherited from the ex-column mod
+	// (otherwise header labels would pick up data-column styling).
+	table := NewWriter(&bytes.Buffer{})
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.SetHeaderColors(Yellow, Yellow)
+	table.SetColumnMods(map[int]ColumnMod{
+		0: NewColumnMod([]ColumnColorMod{NewColumnColorMod(COLOR_ALL, Red)}),
+	})
+
+	table.applyTranspose()
+
+	colZero, ok := table.columnModsByIdx[0]
+	if !ok {
+		t.Fatal("columnModsByIdx[0] missing - header color was not migrated")
+	}
+	if c := colZero.coloring[0].color; c != Yellow {
+		t.Errorf("column 0 color = %v, want Yellow (from header mod)", c)
+	}
+	if len(table.headerMods) != 0 {
+		t.Errorf("headerMods should be cleared after transpose, got %d", len(table.headerMods))
+	}
+
+	// Row mod for row 0 carries the ex-column Red mod; precedence is
+	// resolved in collectColorMods (column mods appended last = higher
+	// priority in colorizeWithRegex).
+	row0 := table.rowModsByIdx[0]
+	if c := row0.coloring[0].color; c != Red {
+		t.Errorf("row 0 color = %v, want Red (preserved from ex-column 0 mod)", c)
+	}
+
+	merged := table.collectColorMods(0, 0)
+	if len(merged) != 2 {
+		t.Fatalf("collectColorMods(0,0) len = %d, want 2", len(merged))
+	}
+	if merged[len(merged)-1].color != Yellow {
+		t.Errorf("highest-priority mod for (col=0,row=0) = %v, want Yellow",
+			merged[len(merged)-1].color)
+	}
+}
+
+func TestTransposeRendersWithColorMods(t *testing.T) {
+	// End-to-end: make sure a transposed render with both header and
+	// column mods produces ANSI-colored output without panicking. We
+	// don't pin exact byte sequences (see note in TestRadTableHeadersAlign)
+	// - just assert escape codes appear and the visible text is intact.
+	buf := &bytes.Buffer{}
+	table := NewWriter(buf)
+	table.ToggleColor(true)
+	table.SetHeader([]string{"Name", "Age"})
+	table.Append([]string{"Alice", "30"})
+	table.SetHeaderColors(Yellow, Yellow)
+	table.SetColumnMods(map[int]ColumnMod{
+		0: NewColumnMod([]ColumnColorMod{NewColumnColorMod(COLOR_ALL, Red)}),
+	})
+	table.SetTranspose(true)
+	table.Render()
+
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[") {
+		t.Error("transposed render with color mods produced no ANSI escapes")
+	}
+	// Strip ANSI and verify the plain layout still looks right.
+	ansi := []byte(out)
+	var plain strings.Builder
+	for i := 0; i < len(ansi); i++ {
+		if ansi[i] == 0x1b {
+			for i < len(ansi) && ansi[i] != 'm' {
+				i++
+			}
+			continue
+		}
+		plain.WriteByte(ansi[i])
+	}
+	want := `+------+-------+
+| NAME | Alice |
+| AGE  |    30 |
++------+-------+
+`
+	assertEqualStr(t, plain.String(), want, "transpose+color plain layout failed")
+}

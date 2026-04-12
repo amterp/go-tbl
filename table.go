@@ -94,8 +94,10 @@ type Table struct {
 	numColumns              int
 	headerMods              []HeaderMod // indexed by column
 	columnModsByIdx         map[int]ColumnMod
+	rowModsByIdx            map[int]ColumnMod
 	columnsAlign            []int
 	forceNoColor            bool
+	transpose               bool
 }
 
 // NewWriter Start New Table
@@ -131,12 +133,227 @@ func NewWriter(writer io.Writer) *Table {
 		numColumns:      -1,
 		headerMods:      []HeaderMod{},
 		columnModsByIdx: map[int]ColumnMod{},
+		rowModsByIdx:    map[int]ColumnMod{},
 		columnsAlign:    []int{}}
 	return t
 }
 
+// tableSnapshot holds the table state that gets replaced during transpose.
+// Used by snapshot/restore so Render() can be called multiple times safely.
+//
+// These are shallow copies: slices and maps store only the header (pointer +
+// len + cap), not the underlying data. This is safe because applyTranspose
+// always *replaces* these fields with new allocations rather than mutating
+// in-place. If you modify applyTranspose, preserve this invariant - never
+// delete from or write into the original maps/slices.
+//
+// If you add a new Table field that gets mutated during rendering, add it
+// here and in both snapshot() and restore().
+type tableSnapshot struct {
+	headers                 [][]string
+	lines                   [][][]string
+	footers                 [][]string
+	cs                      map[int]int
+	rs                      map[int]int
+	numColumns              int
+	columnsAlign            []int
+	headerMods              []HeaderMod
+	columnModsByIdx         map[int]ColumnMod
+	rowModsByIdx            map[int]ColumnMod
+	autoMergeCells          bool
+	columnsToAutoMergeCells map[int]bool
+}
+
+func (t *Table) snapshot() tableSnapshot {
+	return tableSnapshot{
+		headers:                 t.headers,
+		lines:                   t.lines,
+		footers:                 t.footers,
+		cs:                      t.cs,
+		rs:                      t.rs,
+		numColumns:              t.numColumns,
+		columnsAlign:            t.columnsAlign,
+		headerMods:              t.headerMods,
+		columnModsByIdx:         t.columnModsByIdx,
+		rowModsByIdx:            t.rowModsByIdx,
+		autoMergeCells:          t.autoMergeCells,
+		columnsToAutoMergeCells: t.columnsToAutoMergeCells,
+	}
+}
+
+func (t *Table) restore(snap tableSnapshot) {
+	t.headers = snap.headers
+	t.lines = snap.lines
+	t.footers = snap.footers
+	t.cs = snap.cs
+	t.rs = snap.rs
+	t.numColumns = snap.numColumns
+	t.columnsAlign = snap.columnsAlign
+	t.headerMods = snap.headerMods
+	t.columnModsByIdx = snap.columnModsByIdx
+	t.rowModsByIdx = snap.rowModsByIdx
+	t.autoMergeCells = snap.autoMergeCells
+	t.columnsToAutoMergeCells = snap.columnsToAutoMergeCells
+}
+
+// applyTranspose transforms the table data so columns become rows and
+// rows become columns. Headers become the first column, footers become
+// the last column (if present). The transposed table has no header or
+// footer sections.
+func (t *Table) applyTranspose() {
+	numOrigCols := t.countOrigCols()
+	numOrigRows := len(t.lines)
+	hasHeaders := len(t.headers) > 0
+	hasFooters := len(t.footers) > 0
+
+	if numOrigCols == 0 {
+		return
+	}
+
+	// Reset sizing maps for recalculation
+	t.cs = make(map[int]int)
+	t.rs = make(map[int]int)
+
+	// Each original column becomes a transposed row.
+	// Transposed columns: [header_label] + data_rows... + [footer_label]
+	newLines := make([][][]string, numOrigCols)
+
+	for origCol := 0; origCol < numOrigCols; origCol++ {
+		var transposedRow [][]string
+		transposedColIdx := 0
+
+		// First column: original header text (with autoFmt applied
+		// to match how printHeading would have rendered it)
+		if hasHeaders {
+			var cell []string
+			if origCol < len(t.headers) {
+				cell = t.headers[origCol]
+				if t.autoFmt {
+					formatted := make([]string, len(cell))
+					for i, line := range cell {
+						formatted[i] = Title(line)
+					}
+					cell = formatted
+				}
+			}
+			t.addTransposedCell(&transposedRow, cell, transposedColIdx, origCol)
+			transposedColIdx++
+		}
+
+		// Middle columns: original data values
+		for origRow := 0; origRow < numOrigRows; origRow++ {
+			var cell []string
+			if origCol < len(t.lines[origRow]) {
+				cell = t.lines[origRow][origCol]
+			}
+			t.addTransposedCell(&transposedRow, cell, transposedColIdx, origCol)
+			transposedColIdx++
+		}
+
+		// Last column: original footer text (with autoFmt applied
+		// to match how printFooter would have rendered it)
+		if hasFooters {
+			var cell []string
+			if origCol < len(t.footers) {
+				cell = t.footers[origCol]
+				if t.autoFmt {
+					formatted := make([]string, len(cell))
+					for i, line := range cell {
+						formatted[i] = Title(line)
+					}
+					cell = formatted
+				}
+			}
+			t.addTransposedCell(&transposedRow, cell, transposedColIdx, origCol)
+		}
+
+		newLines[origCol] = transposedRow
+	}
+
+	// Replace table state with transposed data
+	t.lines = newLines
+	t.headers = [][]string{}
+	t.footers = [][]string{}
+	t.numColumns = numOrigRows
+	if hasHeaders {
+		t.numColumns++
+	}
+	if hasFooters {
+		t.numColumns++
+	}
+
+	// Remap column color mods to row mods: after transposition, original
+	// column i becomes visual row i. The same regex/color rules apply to the
+	// values, which are now arranged horizontally in that row.
+	t.rowModsByIdx = t.columnModsByIdx
+	t.columnModsByIdx = map[int]ColumnMod{}
+
+	// Convert header styling to column 0: in transposed layout, original
+	// header names are stacked vertically in the first column. Preserve
+	// their color by applying the first header mod as a catch-all column mod.
+	if hasHeaders && len(t.headerMods) > 0 {
+		t.columnModsByIdx[0] = NewColumnMod([]ColumnColorMod{
+			NewColumnColorMod(COLOR_ALL, t.headerMods[0].color),
+		})
+	}
+
+	t.columnsAlign = []int{}
+	t.headerMods = []HeaderMod{}
+	t.autoMergeCells = false
+	t.columnsToAutoMergeCells = nil
+}
+
+// countOrigCols derives the column count from actual data rather than
+// len(t.cs), which can be inflated by SetColMinWidth on out-of-range indices.
+func (t *Table) countOrigCols() int {
+	n := len(t.headers)
+	if len(t.footers) > n {
+		n = len(t.footers)
+	}
+	for _, row := range t.lines {
+		if len(row) > n {
+			n = len(row)
+		}
+	}
+	return n
+}
+
+// addTransposedCell places an already-parsed cell into a transposed row
+// and updates cs/rs directly, avoiding a join+reparse round-trip through
+// parseDimension. This prevents spacer inflation when autoWrap is enabled
+// with reflowText=false.
+func (t *Table) addTransposedCell(row *[][]string, cell []string, colIdx, rowIdx int) {
+	if cell == nil {
+		cell = []string{""}
+	}
+
+	// Update column width (max display width of any line in this cell)
+	maxWidth := 0
+	for _, line := range cell {
+		if w := DisplayWidth(line); w > maxWidth {
+			maxWidth = w
+		}
+	}
+	if v, ok := t.cs[colIdx]; !ok || v < maxWidth || v == 0 {
+		t.cs[colIdx] = maxWidth
+	}
+
+	// Update row height (max line count across cells in this row)
+	h := len(cell)
+	if v, ok := t.rs[rowIdx]; !ok || v < h || v == 0 {
+		t.rs[rowIdx] = h
+	}
+
+	*row = append(*row, cell)
+}
+
 // Render table output
 func (t *Table) Render() {
+	if t.transpose {
+		snap := t.snapshot()
+		t.applyTranspose()
+		defer t.restore(snap)
+	}
 	if t.borders.Top {
 		t.printLine(true, false)
 	}
@@ -306,6 +523,15 @@ func (t *Table) SetAutoMergeCellsByColumnIndex(cols []int) {
 		}
 		t.columnsToAutoMergeCells = m
 	}
+}
+
+// SetTranspose Set Table Transpose
+// When enabled, columns and rows are swapped in the output.
+// Original headers become the first column (with autoFmt applied),
+// each original data row becomes a subsequent column, and original
+// footers (if any) become the last column.
+func (t *Table) SetTranspose(transpose bool) {
+	t.transpose = transpose
 }
 
 // SetBorder Set Table Border
@@ -648,8 +874,8 @@ func (t *Table) printFooter() {
 	// Maximum height.
 	max := t.rs[footerRowIdx]
 
-	// Print Footer
-	for i := 0; i < (len(t.cs) - len(t.footers)); i++ {
+	// Pad footers to match column count
+	for len(t.footers) < len(t.cs) {
 		lines := t.parseDimension(" ", len(t.footers), footerRowIdx)
 		t.footers = append(t.footers, lines)
 	}
@@ -804,11 +1030,8 @@ func (t *Table) printRow(columns [][]string, rowIdx int) {
 	// Pad Each Height
 	pads := []int{}
 
-	// Checking for ANSI escape sequences for columns
-	is_esc_seq := false
-	if len(t.columnModsByIdx) > 0 {
-		is_esc_seq = true
-	}
+	// Checking for ANSI escape sequences for columns or rows
+	is_esc_seq := len(t.columnModsByIdx) > 0 || len(t.rowModsByIdx) > 0
 	t.fillAlignment(total)
 
 	for i, line := range columns {
@@ -831,10 +1054,14 @@ func (t *Table) printRow(columns [][]string, rowIdx int) {
 
 			str := columns[y][x]
 
-			// Embedding escape sequence with column value
+			// Apply color mods from both column and row axes.
+			// Column mods (by visual column) and row mods (by data row)
+			// are merged, with row mods taking higher priority.
 			if is_esc_seq {
-				mod := t.columnModsByIdx[y]
-				str = t.colorizeWithRegex(str, mod.coloring)
+				allMods := t.collectColorMods(y, rowIdx)
+				if len(allMods) > 0 {
+					str = t.colorizeWithRegex(str, allMods)
+				}
 			}
 
 			// This would print alignment
@@ -856,7 +1083,7 @@ func (t *Table) printRow(columns [][]string, rowIdx int) {
 			if !t.noWhiteSpace {
 				fmt.Fprintf(t.out, SPACE)
 			} else {
-				fmt.Fprintf(t.out, t.tablePadding)
+				fmt.Fprint(t.out, t.tablePadding)
 			}
 		}
 		// Check if border is set
@@ -870,6 +1097,22 @@ func (t *Table) printRow(columns [][]string, rowIdx int) {
 	if t.rowLine {
 		t.printLine(false, rowIdx == len(t.lines)-1 && len(t.footers) == 0)
 	}
+}
+
+// collectColorMods merges column-level and row-level color mods for a cell.
+// Row mods are appended first (lower priority), column mods second (higher priority).
+// This means column-level styling (e.g. header colors converted to column 0 during
+// transpose) overrides row-level styling, matching normal-mode behavior where headers
+// are never affected by column color modifiers.
+func (t *Table) collectColorMods(colIdx, rowIdx int) []ColumnColorMod {
+	var mods []ColumnColorMod
+	if rowMod, ok := t.rowModsByIdx[rowIdx]; ok {
+		mods = append(mods, rowMod.coloring...)
+	}
+	if colMod, ok := t.columnModsByIdx[colIdx]; ok {
+		mods = append(mods, colMod.coloring...)
+	}
+	return mods
 }
 
 // Print the rows of the table and merge the cells that are identical
@@ -903,11 +1146,8 @@ func (t *Table) printRowMergeCells(writer io.Writer, columns [][]string, rowIdx 
 	// Pad Each Height
 	pads := []int{}
 
-	// Checking for ANSI escape sequences for columns
-	isEscSeq := false
-	if len(t.columnModsByIdx) > 0 {
-		isEscSeq = true
-	}
+	// Checking for ANSI escape sequences for columns or rows
+	isEscSeq := len(t.columnModsByIdx) > 0 || len(t.rowModsByIdx) > 0
 	for i, line := range columns {
 		length := len(line)
 		pad := max - length
@@ -929,10 +1169,12 @@ func (t *Table) printRowMergeCells(writer io.Writer, columns [][]string, rowIdx 
 
 			str := columns[y][x]
 
-			// Embedding escape sequence with column value
+			// Apply color mods from both column and row axes
 			if isEscSeq {
-				mod := t.columnModsByIdx[y]
-				str = t.colorizeWithRegex(str, mod.coloring)
+				allMods := t.collectColorMods(y, rowIdx)
+				if len(allMods) > 0 {
+					str = t.colorizeWithRegex(str, allMods)
+				}
 			}
 
 			if t.autoMergeCells {
